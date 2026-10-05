@@ -1,0 +1,227 @@
+{
+  "name": "Totem Hackathon - LOYVERSE - Canje (v1)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "# 🧾 Canje de cupón vía Loyverse\nCuando el cajero cobra en Loyverse identificando al cliente por teléfono y aplicando el descuento \"Tótem\", Loyverse dispara el webhook `receipts.update`.\n\nEste flujo:\n1. Verifica la firma (header `X-Loyverse-Signature`, HMAC-SHA256 con el secreto del webhook)\n2. Revisa si el recibo trae el descuento configurado\n3. Marca el cupón `activo` más reciente de ese cliente como `canjeado`\n\n⚠️ Configura DISCOUNT_TOTEM_ID abajo con el ID real del descuento (Loyverse → Items → Discounts).\n⚠️ Verifica el nombre exacto de los campos del payload la primera vez que llegue un recibo real: la firma de arriba es la documentada, pero conviene confirmarla contra un envío real antes de confiar en producción.\n⚠️ Si tu n8n corre en modo \"Function\" restringido, habilita NODE_FUNCTION_ALLOW_BUILTIN=crypto en el entorno para que el nodo de verificación de firma funcione.",
+        "height": 480,
+        "width": 900,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -960,
+        -400
+      ],
+      "id": "36e002c1-d991-4b8d-887c-0cc04990ac96",
+      "name": "🧾 Nota"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "totem-loyverse-receipts",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -960,
+        80
+      ],
+      "id": "c7646a3f-c517-458b-b902-0e5e0cdfea0d",
+      "name": "Loyverse Webhook — Recibos",
+      "webhookId": "totem-loyverse-v1"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ── Verifica la firma del webhook de Loyverse ───────────────────\n// Requiere NODE_FUNCTION_ALLOW_BUILTIN=crypto en el entorno de n8n.\nconst crypto = require('crypto');\n\nconst secret = $env.LOYVERSE_WEBHOOK_SECRET || '';\nconst signatureHeader = $json.headers?.['x-loyverse-signature'] || '';\nconst rawBody = JSON.stringify($json.body || {});\n\nconst firmaCalculada = crypto\n  .createHmac('sha256', secret)\n  .update(rawBody)\n  .digest('hex');\n\nconst firmaValida = secret ? signatureHeader === firmaCalculada : true; // sin secreto configurado, no bloquea (solo para pruebas)\n\nconst receipt = $json.body?.receipts?.[0] || $json.body || {};\n\nreturn {\n  json: {\n    firmaValida,\n    receiptNumber: receipt.receipt_number || null,\n    customerId: receipt.customer_id || null,\n    lineDiscounts: receipt.line_items?.flatMap(li => li.line_discounts || []) || [],\n    totalDiscounts: receipt.total_discounts || [],\n  },\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -736,
+        80
+      ],
+      "id": "57f3a404-2a92-4336-8051-50c0d72d7b21",
+      "name": "Verificar Firma y Extraer Recibo"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.firmaValida }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              },
+              "id": "firma-ok"
+            },
+            {
+              "leftValue": "={{ [...$json.lineDiscounts, ...$json.totalDiscounts].some(d => d.id === $vars.DISCOUNT_TOTEM_ID || d.discount_id === $vars.DISCOUNT_TOTEM_ID) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              },
+              "id": "trae-descuento-totem"
+            },
+            {
+              "leftValue": "={{ $json.customerId }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              },
+              "id": "tiene-cliente"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.1,
+      "position": [
+        -512,
+        80
+      ],
+      "id": "95dd50f1-80a0-4abf-822c-f8879c6a4b62",
+      "name": "¿Recibo con descuento Tótem?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select * from marcar_cupon_canjeado_por_loyverse($1, $2);",
+        "options": {
+          "queryReplacement": "={{ [$json.customerId, $json.receiptNumber] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -288,
+        0
+      ],
+      "id": "58160e21-f38f-428e-8c98-3e59ec4562e8",
+      "name": "Marcar Cupón Canjeado",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_ID",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "OK",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -64,
+        80
+      ],
+      "id": "4c488cb0-19b3-4368-80c5-68125a3c7fef",
+      "name": "Responder OK"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -288,
+        200
+      ],
+      "id": "44766e4c-7659-462f-8a11-4f71cab8e198",
+      "name": "Ignorar (no aplica)"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Loyverse Webhook — Recibos": {
+      "main": [
+        [
+          {
+            "node": "Verificar Firma y Extraer Recibo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar Firma y Extraer Recibo": {
+      "main": [
+        [
+          {
+            "node": "¿Recibo con descuento Tótem?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Recibo con descuento Tótem?": {
+      "main": [
+        [
+          {
+            "node": "Marcar Cupón Canjeado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ignorar (no aplica)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar Cupón Canjeado": {
+      "main": [
+        [
+          {
+            "node": "Responder OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ignorar (no aplica)": {
+      "main": [
+        [
+          {
+            "node": "Responder OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "9801644d-772a-471d-a7d0-4aad5b357c1e",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "id": "b07e969c-4ca0-4f6f-8def-e26c2a008f9d",
+  "tags": []
+}

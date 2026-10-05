@@ -1,0 +1,435 @@
+{
+  "name": "Totem Hackathon - PRODUCTOS (v1 - base)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "# 🛍️ Base para gestionar el catálogo (productos/ofertas)\nEste es el endpoint que debería llamar el futuro panel web del admin — el nodo \"Admin: crea ofertas\" del diagrama.\n\nUn solo webhook, 4 operaciones por el campo `operacion`:\n- `crear` — alta de producto + intenta crear el item espejo en Loyverse\n- `actualizar` — edita un producto existente\n- `desactivar` — baja lógica (`activo=false`), nunca DELETE físico\n- `listar` — catálogo activo, para pintar la tabla del panel\n\n⚠️ El nodo \"Loyverse: Crear Item\" usa el shape de POST /items que documentan SDKs no oficiales (item_name + variants[]); no lo pude verificar contra la doc oficial (redirect loop al leerla). Pruébalo con un producto de prueba antes de confiar en él — si falla, el producto igual queda creado en Supabase, solo no se refleja en Loyverse y tendrías que darlo de alta ahí a mano.",
+        "height": 460,
+        "width": 900,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1280,
+        -400
+      ],
+      "id": "0be80786-6ddc-471f-9e99-e4e98e53214b",
+      "name": "🛍️ Nota"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "totem-productos",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1280,
+        120
+      ],
+      "id": "dc492e4c-7354-4e9a-83cf-b37650df23d9",
+      "name": "Productos — Entrada",
+      "webhookId": "totem-productos-v1"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const body = $json.body || $json;\nreturn {\n  json: {\n    operacion: (body.operacion || '').toLowerCase().trim(), // crear | actualizar | desactivar | listar\n    id: body.id || null,\n    nombre: body.nombre || null,\n    categoria: body.categoria || null,\n    descripcion: body.descripcion || null,\n    precio: body.precio ?? null,\n    costo: body.costo ?? null,\n    etiquetas_demograficas: body.etiquetas_demograficas || [],\n    loyverse_ref: body.loyverse_ref || null,\n  },\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1056,
+        120
+      ],
+      "id": "5b309cc3-203b-402d-95ec-5416d86f5cd4",
+      "name": "Normalizar Entrada"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.operacion }}",
+                    "rightValue": "crear",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "op-crear"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "CREAR"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.operacion }}",
+                    "rightValue": "actualizar",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "op-actualizar"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ACTUALIZAR"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.operacion }}",
+                    "rightValue": "desactivar",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "op-desactivar"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "DESACTIVAR"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        -832,
+        120
+      ],
+      "id": "30cce23f-f0e9-448e-b85c-e67c348fe07e",
+      "name": "Switch — Operación"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into productos (nombre, categoria, descripcion, precio, costo, etiquetas_demograficas, loyverse_ref)\nvalues ($1, $2, $3, $4, $5, $6::jsonb, $7)\nreturning *;",
+        "options": {
+          "queryReplacement": "={{ [$json.nombre, $json.categoria, $json.descripcion, $json.precio, $json.costo, JSON.stringify($json.etiquetas_demograficas), $json.loyverse_ref] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -608,
+        -80
+      ],
+      "id": "2fd7e924-7017-4efd-a956-def842288f91",
+      "name": "Crear Producto",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_ID",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.loyverse.com/v1.0/items",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ item_name: $json.nombre, variants: [{ sku: $json.loyverse_ref, cost: $json.costo, default_price: $json.precio, default_pricing_type: 'FIXED' }] }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -384,
+        -80
+      ],
+      "id": "9b1f0d20-2a85-470e-90e0-b8c95674d67f",
+      "name": "Loyverse: Crear Item",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REEMPLAZAR_ID",
+          "name": "Loyverse Bearer Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update productos set loyverse_variant_id = $1 where id = $2 returning *;",
+        "options": {
+          "queryReplacement": "={{ [$json.variants?.[0]?.variant_id || null, $('Crear Producto').item.json.id] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -160,
+        -80
+      ],
+      "id": "841a2b7c-4a33-47b9-9033-69d0fc961f66",
+      "name": "Guardar loyverse_variant_id",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_ID",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update productos set\n  nombre = coalesce($2, nombre),\n  categoria = coalesce($3, categoria),\n  descripcion = coalesce($4, descripcion),\n  precio = coalesce($5, precio),\n  costo = coalesce($6, costo),\n  etiquetas_demograficas = coalesce($7::jsonb, etiquetas_demograficas)\nwhere id = $1\nreturning *;",
+        "options": {
+          "queryReplacement": "={{ [$json.id, $json.nombre, $json.categoria, $json.descripcion, $json.precio, $json.costo, $json.etiquetas_demograficas?.length ? JSON.stringify($json.etiquetas_demograficas) : null] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -608,
+        120
+      ],
+      "id": "43ef7f7d-9841-4569-883a-f4a347c59d40",
+      "name": "Actualizar Producto",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_ID",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update productos set activo = false where id = $1 returning *;",
+        "options": {
+          "queryReplacement": "={{ [$json.id] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -608,
+        320
+      ],
+      "id": "f3bde900-d569-4381-ae4a-f3f750742895",
+      "name": "Desactivar Producto",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_ID",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select * from productos where activo = true order by categoria, nombre;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -608,
+        520
+      ],
+      "id": "86fc3498-b7b3-49d9-bb25-536c8c339a06",
+      "name": "Listar Productos",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_ID",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        96,
+        120
+      ],
+      "id": "8c49703e-f063-4642-919f-28f6bd194478",
+      "name": "Responder JSON"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Productos — Entrada": {
+      "main": [
+        [
+          {
+            "node": "Normalizar Entrada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar Entrada": {
+      "main": [
+        [
+          {
+            "node": "Switch — Operación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch — Operación": {
+      "main": [
+        [
+          {
+            "node": "Crear Producto",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Actualizar Producto",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Desactivar Producto",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Listar Productos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crear Producto": {
+      "main": [
+        [
+          {
+            "node": "Loyverse: Crear Item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loyverse: Crear Item": {
+      "main": [
+        [
+          {
+            "node": "Guardar loyverse_variant_id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar loyverse_variant_id": {
+      "main": [
+        [
+          {
+            "node": "Responder JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar Producto": {
+      "main": [
+        [
+          {
+            "node": "Responder JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Desactivar Producto": {
+      "main": [
+        [
+          {
+            "node": "Responder JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Listar Productos": {
+      "main": [
+        [
+          {
+            "node": "Responder JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "c214004e-f3c9-4b17-8d5f-f9035c210ebe",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "id": "6604f5eb-7154-4225-beb8-53f14009e440",
+  "tags": []
+}

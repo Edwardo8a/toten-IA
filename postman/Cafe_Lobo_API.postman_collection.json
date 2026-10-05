@@ -1,0 +1,385 @@
+{
+  "info": {
+    "_postman_id": "cafe-lobo-backend-cqrs-2026",
+    "name": "☕ Backend Café Lobo (CQRS)",
+    "description": "Colección completa de endpoints para el Backend de Café Lobo (Dashboard y Tótem) conectado con Supabase y Loyverse POS.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{jwt_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "0. Health & Status",
+      "item": [
+        {
+          "name": "Healthcheck",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Verifica el estado del servicio y si Supabase y Loyverse están configurados."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1. Autenticación (Auth)",
+      "item": [
+        {
+          "name": "Login (Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.token) {",
+                  "    pm.environment.set('jwt_token', jsonData.token);",
+                  "    pm.collectionVariables.set('jwt_token', jsonData.token);",
+                  "    console.log('JWT Token guardado automáticamente:', jsonData.token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"cafelobo2026\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Inicia sesión con credenciales de administrador y guarda automáticamente el token JWT."
+          },
+          "response": []
+        },
+        {
+          "name": "Verificar Sesión (/me)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/auth/me",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "me"]
+            },
+            "description": "Verifica que el token JWT sea válido y devuelve la información del usuario."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. Productos (Catálogo)",
+      "item": [
+        {
+          "name": "Listar Productos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/productos?activo=all",
+              "host": ["{{base_url}}"],
+              "path": ["productos"],
+              "query": [
+                { "key": "activo", "value": "all", "description": "true | false | all" },
+                { "key": "categoria", "value": "", "disabled": true }
+              ]
+            },
+            "description": "Obtiene la lista de productos de Supabase ordenados por categoría y nombre."
+          },
+          "response": []
+        },
+        {
+          "name": "Obtener Producto por ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/productos/1d6cea32-6a12-4d3a-b274-a5f88daa4221",
+              "host": ["{{base_url}}"],
+              "path": ["productos", "1d6cea32-6a12-4d3a-b274-a5f88daa4221"]
+            },
+            "description": "Obtiene los detalles de un producto específico por su ID."
+          },
+          "response": []
+        },
+        {
+          "name": "Crear Producto (Supabase + Espejo Loyverse)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Cold Brew Clásico\",\n  \"categoria\": \"Bebidas frías\",\n  \"descripcion\": \"Extracción en frío durante 18 horas\",\n  \"precio\": 55,\n  \"costo\": 18,\n  \"etiquetas_demograficas\": [\"18-25\", \"26-35\"],\n  \"loyverse_handle\": \"cold-brew-clasico\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/productos",
+              "host": ["{{base_url}}"],
+              "path": ["productos"]
+            },
+            "description": "Crea un producto en Supabase y crea el item correspondiente en Loyverse con su SKU."
+          },
+          "response": []
+        },
+        {
+          "name": "Actualizar Producto",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"precio\": 35,\n  \"descripcion\": \"Café americano recién tostado\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/productos/1d6cea32-6a12-4d3a-b274-a5f88daa4221",
+              "host": ["{{base_url}}"],
+              "path": ["productos", "1d6cea32-6a12-4d3a-b274-a5f88daa4221"]
+            },
+            "description": "Actualiza campos de un producto y sincroniza con Loyverse si cambiaron precio, costo o nombre."
+          },
+          "response": []
+        },
+        {
+          "name": "Desactivar Producto (Baja Lógica)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/productos/1d6cea32-6a12-4d3a-b274-a5f88daa4221",
+              "host": ["{{base_url}}"],
+              "path": ["productos", "1d6cea32-6a12-4d3a-b274-a5f88daa4221"]
+            },
+            "description": "Realiza baja lógica (activo = false) sin borrar físicamente el registro."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. Descuentos (Loyverse)",
+      "item": [
+        {
+          "name": "Listar Descuentos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/descuentos",
+              "host": ["{{base_url}}"],
+              "path": ["descuentos"]
+            },
+            "description": "Consulta GET /discounts en Loyverse en tiempo real."
+          },
+          "response": []
+        },
+        {
+          "name": "Crear Descuento (Loyverse)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Descuento Tótem 15%\",\n  \"tipo\": \"FIXED_PERCENT\",\n  \"valor\": 15\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/descuentos",
+              "host": ["{{base_url}}"],
+              "path": ["descuentos"]
+            },
+            "description": "Crea un descuento en Loyverse. Si no se especifican tiendas, lo aplica a todas las tiendas de la cuenta."
+          },
+          "response": []
+        },
+        {
+          "name": "Actualizar Descuento (Loyverse)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Descuento Tótem 20%\",\n  \"tipo\": \"FIXED_PERCENT\",\n  \"valor\": 20\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/descuentos/{{discount_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["descuentos", "{{discount_id}}"]
+            },
+            "description": "Modifica un descuento en Loyverse."
+          },
+          "response": []
+        },
+        {
+          "name": "Eliminar Descuento (Loyverse)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/descuentos/{{discount_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["descuentos", "{{discount_id}}"]
+            },
+            "description": "Elimina un descuento en Loyverse."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. Ventas (Recibos)",
+      "item": [
+        {
+          "name": "Listar Recibos de Loyverse",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/ventas?limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["ventas"],
+              "query": [
+                { "key": "limit", "value": "10" }
+              ]
+            },
+            "description": "Consulta recibos de Loyverse dentro del rango de 29 días permitido en la capa gratuita."
+          },
+          "response": []
+        },
+        {
+          "name": "Resumen de Ventas por Producto",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/ventas/resumen",
+              "host": ["{{base_url}}"],
+              "path": ["ventas", "resumen"]
+            },
+            "description": "Agrupa line_items de Loyverse y cruza con catálogo Supabase para ranking de ventas."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5. Cupones y Clientes",
+      "item": [
+        {
+          "name": "Listar Cupones",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/cupones?limit=50",
+              "host": ["{{base_url}}"],
+              "path": ["cupones"],
+              "query": [
+                { "key": "limit", "value": "50" },
+                { "key": "estado", "value": "activo", "disabled": true }
+              ]
+            },
+            "description": "Consulta cupones generados en Supabase."
+          },
+          "response": []
+        },
+        {
+          "name": "Estadísticas Demográficas Clientes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/clientes/stats",
+              "host": ["{{base_url}}"],
+              "path": ["clientes", "stats"]
+            },
+            "description": "Agrupa clientes por rango de edad y género para gráficos demográficos."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6. Estadísticas y Sugerencias Tótem",
+      "item": [
+        {
+          "name": "Nivel 1: Top Productos por Segmento",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/estadisticas/top-productos?segmento=edad&valor=26-35",
+              "host": ["{{base_url}}"],
+              "path": ["estadisticas", "top-productos"],
+              "query": [
+                { "key": "segmento", "value": "edad" },
+                { "key": "valor", "value": "26-35" }
+              ]
+            },
+            "description": "Recomendaciones basadas en interacciones de cámara del tótem por rango de edad o género."
+          },
+          "response": []
+        },
+        {
+          "name": "Nivel 2: Afinidad de Canasta (Venta Cruzada)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/estadisticas/afinidad?producto_id=1d6cea32-6a12-4d3a-b274-a5f88daa4221",
+              "host": ["{{base_url}}"],
+              "path": ["estadisticas", "afinidad"],
+              "query": [
+                { "key": "producto_id", "value": "1d6cea32-6a12-4d3a-b274-a5f88daa4221" }
+              ]
+            },
+            "description": "Market Basket Analysis de Loyverse: qué otros productos se compran conjuntamente con el producto seleccionado."
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:4000/api",
+      "type": "string"
+    },
+    {
+      "key": "jwt_token",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

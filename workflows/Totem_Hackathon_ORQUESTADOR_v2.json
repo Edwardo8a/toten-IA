@@ -1,0 +1,823 @@
+{
+  "name": "Totem Hackathon - ORQUESTADOR (v2 - con Loyverse)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "# 📥 Entrada del tótem por WhatsApp\nWAHA Webhook recibe el mensaje ya sea porque:\n- El cliente escaneó el QR del tótem (texto trae `CUPON:<interaccion_id>`)\n- El cliente está respondiendo la encuesta (texto = 1-4)\n- El cliente pide borrar sus datos (`BORRAR MIS DATOS`)\n\nEl nodo Normalizar deja todo en un esquema plano y el nodo Detectar Intención decide la rama.",
+        "height": 380,
+        "width": 900,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -2400,
+        -680
+      ],
+      "id": "79ba958a-6ad0-4790-96f8-208f64c3eb61",
+      "name": "📥 Entrada Nota"
+    },
+    {
+      "parameters": {
+        "content": "# 🔀 Ramas\n1️⃣ CUPON — primer escaneo del QR: alta/actualización de cliente, genera cupón, vincula la interacción del tótem y sincroniza el cliente en Loyverse (para que el cajero lo identifique por teléfono al cobrar)\n2️⃣ ENCUESTA — respuesta numérica 1-4: guarda preferencia en `clientes.preferencias_gustos`\n3️⃣ BORRAR — derecho ARCO: `borrar_datos_cliente()`\n4️⃣ DESCONOCIDO — mensaje de ayuda\n\n⚠️ El canje del cupón YA NO pasa por aquí: lo dispara el webhook `receipts.update` de Loyverse en el workflow separado \"LOYVERSE - Canje\".",
+        "height": 420,
+        "width": 900,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -560,
+        -680
+      ],
+      "id": "b39e1b29-b9c5-46ed-a7ec-4fcd1e950b39",
+      "name": "🔀 Ramas Nota"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "totem-waha",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -2400,
+        -400
+      ],
+      "id": "82c895f0-be15-4013-ac06-0564b69348a6",
+      "name": "WAHA Webhook — Tótem",
+      "webhookId": "totem-waha-v1"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ── Normalizar entrada desde WAHA (NOWEB) — mismo patrón que el chatbot UTSJR ──\nlet payload;\nif ($json.payload && typeof $json.payload === 'object') {\n  payload = $json.payload;\n} else if ($json.body && typeof $json.body === 'object') {\n  payload = $json.body.payload || $json.body;\n} else {\n  payload = $json;\n}\n\nconst texto = (payload.body || payload.text || '').trim();\n\nconst chatIdRaw = payload.from || $json.from || '';\nconst chatId = chatIdRaw\n  .replace(/@lid$/, '@c.us')\n  .replace(/@s\\.whatsapp\\.net$/, '@c.us');\n\nconst numero = chatId.replace('@c.us', '').replace('@g.us', '');\nconst sessionId = 'totem_' + numero;\n\nconst sanitize = (t) => (t || '')\n  .replace(/<script[\\s\\S]*?<\\/script>/gi, '')\n  .replace(/<[^>]+>/g, '')\n  .substring(0, 500);\n\nconst textoLimpio = sanitize(texto);\nconst nombreUsuario = payload.pushName || chatIdRaw.split('@')[0] || 'usuario';\n\nreturn {\n  json: {\n    texto: textoLimpio,\n    textoLower: textoLimpio.toLowerCase(),\n    chatId,\n    numero,\n    sessionId,\n    nombreUsuario,\n    timestamp: payload.timestamp || Date.now(),\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2176,
+        -400
+      ],
+      "id": "15ffcecf-0ca8-4403-bc94-454764e38351",
+      "name": "Normalizar WAHA",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ── Detecta la intención del mensaje entrante ──────────────────\nconst texto = $json.texto || '';\nconst textoLower = $json.textoLower || '';\n\nlet intencion = 'desconocido';\nlet interaccionId = null;\n\nif (/^cupon:/i.test(texto)) {\n  intencion = 'cupon';\n  interaccionId = texto.split(':')[1]?.trim() || null;\n} else if (textoLower === 'borrar mis datos') {\n  intencion = 'borrar';\n} else if (/^[1-4]$/.test(texto.trim())) {\n  intencion = 'encuesta';\n}\n\nreturn { json: { ...$json, intencion, interaccionId } };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1952,
+        -400
+      ],
+      "id": "6d12686a-474d-44d0-bec6-cd912933c3c4",
+      "name": "Detectar Intención"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intencion }}",
+                    "rightValue": "cupon",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "int-cupon"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "CUPON"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intencion }}",
+                    "rightValue": "encuesta",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "int-encuesta"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ENCUESTA"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intencion }}",
+                    "rightValue": "borrar",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "int-borrar"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "BORRAR"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        -1728,
+        -400
+      ],
+      "id": "5d22a852-800e-4efd-8cd9-4256dcdaaba6",
+      "name": "Switch — Intención"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select id, producto_recomendado_id\nfrom interacciones_totem\nwhere id = $1::uuid\nlimit 1;",
+        "options": {
+          "queryReplacement": "={{ [$json.interaccionId] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -1472,
+        -640
+      ],
+      "id": "dd4c5be9-b7ed-4aa3-8c31-584197bc09be",
+      "name": "Buscar Interacción",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_ID",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into clientes (telefono, genero_detectado, rango_edad)\nvalues ($1, $2, $3)\non conflict (telefono) do update\n  set genero_detectado = excluded.genero_detectado,\n      rango_edad        = excluded.rango_edad\nreturning id;",
+        "options": {
+          "queryReplacement": "={{ [$('Detectar Intención').item.json.numero, $json.genero_capturado, $json.edad_capturada] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -1248,
+        -640
+      ],
+      "id": "c33c11ae-4c3f-4543-bc9a-f2700db163c1",
+      "name": "Upsert Cliente",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_ID",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select * from generar_cupon($1::uuid, $2::uuid, $3::int);",
+        "options": {
+          "queryReplacement": "={{ [$json.id, $('Buscar Interacción').item.json.producto_recomendado_id, 7] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -1024,
+        -640
+      ],
+      "id": "406376cc-9397-468f-962c-a5850bed5908",
+      "name": "Generar Cupón",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_ID",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update interacciones_totem\nset cliente_id = $1::uuid, qr_escaneado = true\nwhere id = $2::uuid;",
+        "options": {
+          "queryReplacement": "={{ [$('Upsert Cliente').item.json.id, $('Buscar Interacción').item.json.id] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -800,
+        -640
+      ],
+      "id": "b95f61de-e29b-41c8-bfdb-43bf329205a7",
+      "name": "Vincular Interacción",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_ID",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.loyverse.com/v1.0/customers",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "phone_number",
+              "value": "={{ '+' + $('Detectar Intención').item.json.numero }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -800,
+        -880
+      ],
+      "id": "31b4286f-64e4-4934-b64a-33e31f3729a6",
+      "name": "Loyverse: Buscar Cliente",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REEMPLAZAR_ID",
+          "name": "Loyverse Bearer Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ ($json.customers || []).length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              },
+              "id": "loyverse-existe"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.1,
+      "position": [
+        -576,
+        -880
+      ],
+      "id": "44747381-1268-4b92-8b9d-a3da94a3849a",
+      "name": "¿Existe en Loyverse?"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return { json: { loyverseCustomerId: $json.customers[0].id } };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        -960
+      ],
+      "id": "311cd9df-c29a-4bdc-aea5-121dfef17a68",
+      "name": "Usar Cliente Loyverse Existente"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.loyverse.com/v1.0/customers",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ name: $('Detectar Intención').item.json.nombreUsuario, phone_number: '+' + $('Detectar Intención').item.json.numero, customer_code: $('Upsert Cliente').item.json.id }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -352,
+        -800
+      ],
+      "id": "89442e53-a21d-41a6-88ea-ee4b664b27dd",
+      "name": "Loyverse: Crear Cliente",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REEMPLAZAR_ID",
+          "name": "Loyverse Bearer Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return { json: { loyverseCustomerId: $json.id } };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -128,
+        -800
+      ],
+      "id": "2149e82a-99e5-4279-8dd8-a111bff89286",
+      "name": "Usar Cliente Loyverse Nuevo"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update clientes set loyverse_customer_id = $1 where id = $2;",
+        "options": {
+          "queryReplacement": "={{ [$json.loyverseCustomerId, $('Upsert Cliente').item.json.id] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        96,
+        -880
+      ],
+      "id": "5335f2fc-e70b-4ef9-9c22-3a6d8a61bb0d",
+      "name": "Guardar loyverse_customer_id",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_ID",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const cupon = $json;\nreturn {\n  json: {\n    ...$('Detectar Intención').item.json,\n    mensajeEnvio:\n      `🎁 ¡Aquí tienes tu cupón!\\n\\nCódigo: *${cupon.codigo}*\\nVálido hasta: ${new Date(cupon.fecha_expiracion).toLocaleDateString('es-MX')}\\n\\nMuéstralo en caja para canjearlo.\\n\\nPara conocerte mejor, responde con un número:\\n1️⃣ Bebidas  2️⃣ Alimentos  3️⃣ Postres  4️⃣ Snacks`,\n  },\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        -640
+      ],
+      "id": "9be548ed-4a47-4083-b27e-1c8d3c891457",
+      "name": "Preparar Mensaje Cupón"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update clientes\nset preferencias_gustos = preferencias_gustos || jsonb_build_object('ultima_respuesta', $1, 'actualizado', now())\nwhere telefono = $2;",
+        "options": {
+          "queryReplacement": "={{ [$json.texto, $json.numero] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -1472,
+        -400
+      ],
+      "id": "9da315b0-2ae0-4562-aafc-e8a1b7577de0",
+      "name": "Guardar Respuesta Encuesta",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_ID",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return {\n  json: {\n    ...$('Detectar Intención').item.json,\n    mensajeEnvio: '¡Gracias! Con esto te vamos a mandar mejores promociones la próxima vez que nos visites. 😊',\n  },\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1248,
+        -400
+      ],
+      "id": "a2ce5aeb-c9a2-4d4c-9ecb-566a1d7f191d",
+      "name": "Preparar Mensaje Encuesta"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select borrar_datos_cliente($1) as borrado;",
+        "options": {
+          "queryReplacement": "={{ [$json.numero] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -1472,
+        -176
+      ],
+      "id": "c3c90e48-e6cf-4a1e-b033-6855a5909895",
+      "name": "Borrar Datos Cliente",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_ID",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return {\n  json: {\n    ...$('Detectar Intención').item.json,\n    mensajeEnvio: $json.borrado\n      ? '✅ Listo, borramos toda tu información de nuestro sistema.'\n      : 'No encontramos datos guardados a tu nombre; no había nada que borrar.',\n  },\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1248,
+        -176
+      ],
+      "id": "e0d7c5b5-0822-4a7c-b55f-5052b87d89f6",
+      "name": "Preparar Mensaje Borrar"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return {\n  json: {\n    ...$json,\n    mensajeEnvio: '👋 Hola, escanea el código QR del tótem para recibir tu cupón, o escribe *BORRAR MIS DATOS* si quieres que eliminemos tu información.',\n  },\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1472,
+        48
+      ],
+      "id": "2a04273a-0072-4952-9995-388168407c6a",
+      "name": "Preparar Mensaje Ayuda"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://lobo-waha:3000/api/sendText",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"session\": \"default\",\n  \"chatId\": \"{{ $json.chatId }}\",\n  \"text\": {{ JSON.stringify($json.mensajeEnvio) }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -320,
+        -400
+      ],
+      "id": "73de64e7-e937-4a86-9a4e-78f6fb78ac8c",
+      "name": "Enviar WA Respuesta",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REEMPLAZAR_ID",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "OK",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -96,
+        -400
+      ],
+      "id": "6ff77cc9-b7e5-4165-84cc-9e84f833a299",
+      "name": "Responder OK"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "WAHA Webhook — Tótem": {
+      "main": [
+        [
+          {
+            "node": "Normalizar WAHA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar WAHA": {
+      "main": [
+        [
+          {
+            "node": "Detectar Intención",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detectar Intención": {
+      "main": [
+        [
+          {
+            "node": "Switch — Intención",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch — Intención": {
+      "main": [
+        [
+          {
+            "node": "Buscar Interacción",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Guardar Respuesta Encuesta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Borrar Datos Cliente",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar Mensaje Ayuda",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Interacción": {
+      "main": [
+        [
+          {
+            "node": "Upsert Cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Cliente": {
+      "main": [
+        [
+          {
+            "node": "Generar Cupón",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generar Cupón": {
+      "main": [
+        [
+          {
+            "node": "Vincular Interacción",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vincular Interacción": {
+      "main": [
+        [
+          {
+            "node": "Loyverse: Buscar Cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loyverse: Buscar Cliente": {
+      "main": [
+        [
+          {
+            "node": "¿Existe en Loyverse?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Existe en Loyverse?": {
+      "main": [
+        [
+          {
+            "node": "Usar Cliente Loyverse Existente",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loyverse: Crear Cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loyverse: Crear Cliente": {
+      "main": [
+        [
+          {
+            "node": "Usar Cliente Loyverse Nuevo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Usar Cliente Loyverse Existente": {
+      "main": [
+        [
+          {
+            "node": "Guardar loyverse_customer_id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Usar Cliente Loyverse Nuevo": {
+      "main": [
+        [
+          {
+            "node": "Guardar loyverse_customer_id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar loyverse_customer_id": {
+      "main": [
+        [
+          {
+            "node": "Preparar Mensaje Cupón",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar Respuesta Encuesta": {
+      "main": [
+        [
+          {
+            "node": "Preparar Mensaje Encuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Borrar Datos Cliente": {
+      "main": [
+        [
+          {
+            "node": "Preparar Mensaje Borrar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Mensaje Cupón": {
+      "main": [
+        [
+          {
+            "node": "Enviar WA Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Mensaje Encuesta": {
+      "main": [
+        [
+          {
+            "node": "Enviar WA Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Mensaje Borrar": {
+      "main": [
+        [
+          {
+            "node": "Enviar WA Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Mensaje Ayuda": {
+      "main": [
+        [
+          {
+            "node": "Enviar WA Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar WA Respuesta": {
+      "main": [
+        [
+          {
+            "node": "Responder OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "c65cd9fd-8b34-4d02-b54e-65702ddc4d93",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "id": "2a35e27f-32d4-4258-8753-e8dfa6c25253",
+  "tags": []
+}
